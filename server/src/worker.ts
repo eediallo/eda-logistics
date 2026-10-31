@@ -16,9 +16,22 @@ const workerId = `${hostname()}-${process.pid}`;
 const database = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: {autoRefreshToken: false, persistSession: false},
 });
+
+function kafkaSecurityOptions() {
+  if (env.KAFKA_SECURITY_PROTOCOL !== 'sasl_ssl') return {};
+  const credentials = {username: env.KAFKA_USERNAME!, password: env.KAFKA_PASSWORD!};
+  switch (env.KAFKA_SASL_MECHANISM) {
+    case 'plain': return {ssl: true, sasl: {mechanism: 'plain' as const, ...credentials}};
+    case 'scram-sha-256': return {ssl: true, sasl: {mechanism: 'scram-sha-256' as const, ...credentials}};
+    case 'scram-sha-512': return {ssl: true, sasl: {mechanism: 'scram-sha-512' as const, ...credentials}};
+    default: throw new Error('A supported Kafka SASL mechanism is required.');
+  }
+}
+
 const kafka = new Kafka({
   clientId: 'pharmacy-delivery-worker',
   brokers: env.KAFKA_BROKERS.split(',').map((broker) => broker.trim()).filter(Boolean),
+  ...kafkaSecurityOptions(),
 });
 const producer = kafka.producer({idempotent: true, maxInFlightRequests: 1});
 const consumer = kafka.consumer({groupId: 'pharmacy-delivery-notifications'});

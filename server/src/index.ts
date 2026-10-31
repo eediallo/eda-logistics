@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import path from 'node:path';
 import {z} from 'zod';
 import {Runner, InMemorySessionService} from '@google/adk';
 import type {FastifyReply, FastifyRequest} from 'fastify';
@@ -7,6 +9,11 @@ import {authenticate, requireRole} from './auth.js';
 import {env} from './env.js';
 
 const app = Fastify({logger: true});
+await app.register(fastifyStatic, {
+  root: path.join(process.cwd(), 'dist'),
+  prefix: '/',
+  wildcard: false,
+});
 const orderInput = z.object({
   prescriptionMappingId: z.string().uuid(),
   deliveryAddress: z.string().trim().min(5).max(500),
@@ -363,6 +370,13 @@ app.post('/api/assistant/dispatch', async (request, reply) => {
       'text' in part && part.text ? [part.text] : []));
   }
   return {answer: events.at(-1) ?? 'I could not produce a response.'};
+});
+
+app.setNotFoundHandler((request, reply) => {
+  if (request.method === 'GET' && !request.url.startsWith('/api/')) {
+    return reply.sendFile('index.html');
+  }
+  return reply.code(404).send({error: 'Not found.'});
 });
 
 app.setErrorHandler((error, request, reply) => {

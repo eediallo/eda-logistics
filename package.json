@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/eediallo/eda-logistics#readme",
   "dependencies": {
+    "@fastify/static": "^10.1.8",
     "@google/adk": "^2.4.0",
     "@supabase/supabase-js": "^2.57.0",
     "fastify": "^5.6.0",

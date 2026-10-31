@@ -5,7 +5,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY,
 );
-const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const apiBase = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 type Role = 'pharmacy' | 'driver' | 'admin';
 type Profile = {id: string; email: string | null; role: Role | null; display_name: string | null};

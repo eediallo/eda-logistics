@@ -53,3 +53,28 @@ User requests are authenticated with Supabase access tokens. Database requests u
 6. The Kafka worker publishes outbox events and records deduplicated in-app notifications.
 
 Driver-visible queue rows do not contain medication details or delivery addresses. A separate table and RLS policy reveal those details only to the pharmacy and the driver assigned to that delivery.
+
+## Deploy to Google Cloud
+
+The GitHub Actions workflow in `.github/workflows/deploy-gcp.yml` deploys on every push to `main` (and supports manual runs). It applies pending Supabase migrations, builds one container, deploys the web app and API together as a public Cloud Run service, and deploys the Kafka consumer as a one-instance Cloud Run Worker Pool. The browser and API share one origin; API routes still require Supabase access tokens. Supabase remains the database and Auth provider.
+
+The workflow targets a managed Kafka service with KafkaJS-compatible TLS/SCRAM authentication, such as Confluent Cloud. Create the `delivery.milestones` topic and grant the worker credentials permission to produce and consume that topic. The current local Docker Kafka remains plaintext; the worker uses TLS/SCRAM when `KAFKA_SECURITY_PROTOCOL=sasl_ssl`. Google Cloud's Managed Service for Apache Kafka can also work, but its non-Java OAuth setup needs an auth sidecar, so this initial workflow uses a KafkaJS-native SCRAM provider.
+
+Before enabling the workflow:
+
+1. In GCP, enable Cloud Run, Artifact Registry, Secret Manager, and IAM Credentials APIs. Create a Docker repository in Artifact Registry.
+2. Create a GitHub Workload Identity Federation provider restricted to this repository's `main` branch, plus a deployer service account. Give the deployer permission to push to the Artifact Registry repository and deploy Cloud Run services/worker pools, and permission to act as the runtime service account. Use federation instead of a downloadable service-account key.
+3. Create a Cloud Run runtime service account. Grant it Secret Manager Secret Accessor on the four secrets below.
+4. Create these Secret Manager secrets and add values: `supabase-service-role-key`, `gemini-api-key`, `kafka-username`, and `kafka-password`.
+5. Add the following GitHub Actions **variables**:
+
+   - `GCP_PROJECT_ID`, `GCP_REGION`, and `GCP_ARTIFACT_REGISTRY_REPOSITORY`
+   - `GCP_WORKLOAD_IDENTITY_PROVIDER` (the full provider resource name)
+   - `GCP_DEPLOYER_SERVICE_ACCOUNT` and `GCP_RUNTIME_SERVICE_ACCOUNT` (service account emails)
+   - `SUPABASE_PROJECT_REF`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`
+   - `GEMINI_MODEL` (for example, `gemini-3.5-flash-lite`)
+   - `KAFKA_BROKERS` (the managed Kafka bootstrap broker) and `KAFKA_SASL_MECHANISM` (`scram-sha-256` or `scram-sha-512`)
+
+6. Add these GitHub Actions **secrets**: `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`. The migration step runs `supabase db push --linked` before deploying; keep production migrations additive and review them before merging to `main`.
+
+The deployment workflow does not seed demo users or sample records into the hosted database. Demo data is only created by the local startup script.
