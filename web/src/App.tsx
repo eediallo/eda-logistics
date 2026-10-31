@@ -224,6 +224,7 @@ export function App() {
       onSignOut={() => void supabase.auth.signOut()}
       onLoadUsers={async () => (await request<{users: AdminUser[]}>('/api/admin/users')).users}
       onAssignRole={async (userId, role) => {await request(`/api/admin/users/${userId}/role`, {method: 'PATCH', body: JSON.stringify({role})});}}
+      onAskAssistant={(message) => request('/api/assistant/dispatch', {method: 'POST', body: JSON.stringify({message})})}
     />;
   }
 
@@ -261,7 +262,7 @@ export function App() {
         </section>
         <aside className="right-column">
           {profile.role === 'pharmacy' && <InventoryPanel busy={busy} medications={medications} onUpdateMedication={(id, stockCount) => runAction(() => request(`/api/inventory/${id}`, {method: 'PATCH', body: JSON.stringify({stockCount})}))} onAddMedication={(input) => runAction(() => request('/api/inventory', {method: 'POST', body: JSON.stringify(input)}))} onAddPrescription={(input) => runAction(() => request('/api/prescriptions', {method: 'POST', body: JSON.stringify(input)}))}/>}
-          {profile.role === 'pharmacy' && <AssistantPanel busy={busy} onAsk={(message) => runAction(() => request('/api/assistant/dispatch', {method: 'POST', body: JSON.stringify({message})}))}/>}
+          <AssistantPanel role={profile.role} onAsk={(message) => request('/api/assistant/dispatch', {method: 'POST', body: JSON.stringify({message})})}/>
           <section className="panel notification-panel"><div className="panel-header"><div><p className="eyebrow">UPDATES</p><h3>Notifications</h3></div><span className="notification-count">{notifications.filter((item) => !item.read_at).length}</span></div>
             {notifications.length === 0 ? <p className="muted small-copy">Milestone updates will appear here.</p> : <div className="notification-list">{notifications.map((item) => <button className={`notification-item ${item.read_at ? '' : 'notification-unread'}`} key={item.id} onClick={() => !item.read_at && void markNotificationRead(item)}>
               <span className="notification-dot"/><span className="notification-text"><b>{item.title}</b><small>{item.body}</small><time>{new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</time></span></button>)}</div>}
@@ -306,11 +307,12 @@ function SignIn(props: {
   </form></section></main>;
 }
 
-function AdminDashboard({profile, onLoadUsers, onAssignRole, onSignOut}: {
+function AdminDashboard({profile, onLoadUsers, onAssignRole, onSignOut, onAskAssistant}: {
   profile: Profile;
   onLoadUsers: () => Promise<AdminUser[]>;
   onAssignRole: (userId: string, role: Role) => Promise<void>;
   onSignOut: () => void;
+  onAskAssistant: (message: string) => Promise<unknown>;
 }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, Role | ''>>({});
@@ -369,6 +371,7 @@ function AdminDashboard({profile, onLoadUsers, onAssignRole, onSignOut}: {
           </div>)}
         </div>}
       </section>
+      <AssistantPanel role="admin" onAsk={onAskAssistant}/>
       <p className="admin-note">New accounts may select Pharmacy or Driver during signup. Only an existing admin can grant or change admin access.</p>
       <footer>GOODROUTE <span>·</span> Care, delivered with care.</footer>
     </main>
@@ -449,19 +452,39 @@ function OrderCard({role, order, busy, onAction, onLocation}: {role: Role; order
   </article>;
 }
 
-function AssistantPanel({busy, onAsk}: {busy: boolean; onAsk: (message: string) => Promise<unknown>}) {
-  const [message, setMessage] = useState('How many items have been delivered, and who has completed the most deliveries?');
+function AssistantPanel({role, onAsk}: {role: Role; onAsk: (message: string) => Promise<unknown>}) {
+  const starterPrompts: Record<Role, string> = {
+    pharmacy: 'How many items have been delivered, and who has completed the most deliveries?',
+    driver: 'How many deliveries are available, and what is the status of my assigned deliveries?',
+    admin: 'How many deliveries have been completed, who are the top drivers, and how many accounts does each role have?',
+  };
+  const [message, setMessage] = useState(starterPrompts[role]);
   const [answer, setAnswer] = useState('');
+  const [assistantError, setAssistantError] = useState('');
+  const [asking, setAsking] = useState(false);
   async function ask() {
+    setAsking(true);
+    setAssistantError('');
     try {
       const result = await onAsk(message) as {answer: string};
       setAnswer(result.answer);
-    } catch { /* The shared dashboard alert shows request errors. */ }
+    } catch (cause) {
+      setAssistantError(cause instanceof Error ? cause.message : 'Could not get an assistant response.');
+    } finally {
+      setAsking(false);
+    }
   }
-  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK DELIVERY ASSISTANT</p><h3>Ask about deliveries</h3></div></div>
-    <p className="assistant-desc">Ask about delivery counts, completed items, top drivers, or the ready queue.</p>
+  const label = role === 'admin' ? 'ADMIN ASSISTANT' : role === 'driver' ? 'DRIVER ASSISTANT' : 'PHARMACY ASSISTANT';
+  const description = role === 'admin'
+    ? 'Ask about workspace delivery performance, top drivers, and account roles.'
+    : role === 'driver'
+      ? 'Ask about available pickups, your assigned deliveries, and your progress.'
+      : 'Ask about delivery counts, completed items, top drivers, or the ready queue.';
+  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK {label}</p><h3>Ask about deliveries</h3></div></div>
+    <p className="assistant-desc">{description}</p>
     <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} aria-label="Ask about deliveries"/>
-    <button className="button button-dark full-width" disabled={busy || !message.trim()} onClick={() => void ask()}>{busy ? 'Checking deliveries…' : 'Ask assistant'} <span>↗</span></button>
+    <button className="button button-dark full-width" disabled={asking || !message.trim()} onClick={() => void ask()}>{asking ? 'Checking deliveries…' : 'Ask assistant'} <span>↗</span></button>
+    {assistantError && <p className="assistant-answer" role="alert">{assistantError}</p>}
     {answer && <p className="assistant-answer">{answer}</p>}
   </section>;
 }

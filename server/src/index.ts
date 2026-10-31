@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import {z} from 'zod';
 import {Runner, InMemorySessionService} from '@google/adk';
 import type {FastifyReply, FastifyRequest} from 'fastify';
-import {createDispatcherAgent} from '../../agent.js';
+import {createAdminAgent, createDispatcherAgent, createDriverAgent} from '../../agent.js';
 import {authenticate, requireRole} from './auth.js';
 import {env} from './env.js';
 
@@ -340,11 +340,15 @@ app.get('/api/analytics', async (request, reply) => {
 
 app.post('/api/assistant/dispatch', async (request, reply) => {
   const user = await authenticate(request, reply);
-  if (!user || !(await requireRole(user, ['pharmacy', 'admin'], reply))) return;
+  if (!user || !(await requireRole(user, ['pharmacy', 'driver', 'admin'], reply))) return;
   const parsed = assistantInput.safeParse(request.body);
   if (!parsed.success) return reply.code(400).send({error: parsed.error.flatten()});
 
-  const agent = createDispatcherAgent(user.db);
+  const agent = user.role === 'driver'
+    ? createDriverAgent(user.db, user.id)
+    : user.role === 'admin'
+      ? createAdminAgent(user.db)
+      : createDispatcherAgent(user.db);
   const runner = new Runner({
     appName: 'pharmacy-delivery',
     agent,
