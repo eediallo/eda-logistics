@@ -355,7 +355,7 @@ app.post('/api/assistant/dispatch', async (request, reply) => {
     ? createDriverAgent(user.db, user.id)
     : user.role === 'admin'
       ? createAdminAgent(user.db)
-      : createDispatcherAgent(user.db);
+      : createDispatcherAgent(user.db, user.id);
   const runner = new Runner({
     appName: 'pharmacy-delivery',
     agent,

@@ -47,21 +47,118 @@ function readyQueueTool(database: SupabaseClient) {
   return listReadyOrders;
 }
 
-/** Pharmacy assistant: delivery metrics and its ready dispatch queue. */
-export function createDispatcherAgent(database: SupabaseClient): LlmAgent {
+function pharmacyInventoryTools(database: SupabaseClient, pharmacyId: string) {
+  const listStock = new FunctionTool({
+    name: 'list_pharmacy_stock',
+    description: 'Lists this pharmacy’s medication names, dosages, stock counts, and IDs. Use it to identify an exact item before restocking.',
+    parameters: z.object({}),
+    execute: async () => {
+      const {data, error} = await database.from('medications')
+        .select('id,name,dosage,stock_count,is_active')
+        .eq('pharmacy_id', pharmacyId).order('name').limit(100);
+      if (error) throw new Error('Could not load this pharmacy’s stock.');
+      return data;
+    },
+  });
+
+  const createStockItem = new FunctionTool({
+    name: 'create_pharmacy_stock_item',
+    description: 'Creates a new medication inventory item for this pharmacy with its starting stock count. Use only when explicitly asked to create a new item.',
+    parameters: z.object({
+      name: z.string().trim().min(1).max(200),
+      dosage: z.string().trim().min(1).max(100),
+      initialStock: z.number().int().min(0).max(1_000_000),
+    }),
+    execute: async ({name, dosage, initialStock}) => {
+      const {data, error} = await database.from('medications').insert({
+        pharmacy_id: pharmacyId,
+        name,
+        dosage,
+        stock_count: initialStock,
+      }).select('id,name,dosage,stock_count,is_active').single();
+      if (error) throw new Error('Could not create the medication stock item.');
+      return data;
+    },
+  });
+
+  const addStockQuantity = new FunctionTool({
+    name: 'add_pharmacy_stock_quantity',
+    description: 'Adds a quantity to an existing item. The quantity is units to add, not the desired final stock total. Requires an item ID from list_pharmacy_stock.',
+    parameters: z.object({
+      medicationId: z.string().uuid(),
+      quantity: z.number().int().min(1).max(1_000_000),
+    }),
+    execute: async ({medicationId, quantity}) => {
+      const {data, error} = await database.rpc('increase_medication_stock', {
+        p_medication_id: medicationId,
+        p_quantity: quantity,
+      });
+      if (error) throw new Error(error.code === 'P0002'
+        ? 'Medication was not found for this pharmacy or the stock limit would be exceeded.'
+        : 'Could not add to medication stock.');
+      return data;
+    },
+  });
+
+  return [listStock, createStockItem, addStockQuantity];
+}
+
+function pharmacyOrderTools(database: SupabaseClient, pharmacyId: string) {
+  const listPendingOrders = new FunctionTool({
+    name: 'list_my_pending_delivery_orders',
+    description: 'Lists this pharmacy’s pending orders with IDs and short order codes so the pharmacy can choose one to mark ready.',
+    parameters: z.object({}),
+    execute: async () => {
+      const {data, error} = await database.from('delivery_orders')
+        .select('id,created_at').eq('pharmacy_id', pharmacyId).eq('status', 'pending')
+        .order('created_at', {ascending: true}).limit(50);
+      if (error) throw new Error('Could not load pending delivery orders.');
+      return (data ?? []).map((order) => ({
+        id: order.id,
+        orderCode: order.id.slice(0, 8),
+        createdAt: order.created_at,
+      }));
+    },
+  });
+
+  const markOrderReady = new FunctionTool({
+    name: 'mark_pharmacy_delivery_ready',
+    description: 'Marks one of this pharmacy’s pending orders ready for driver pickup. Requires the exact ID returned by list_my_pending_delivery_orders.',
+    parameters: z.object({deliveryOrderId: z.string().uuid()}),
+    execute: async ({deliveryOrderId}) => {
+      const {data, error} = await database.from('delivery_orders').update({status: 'ready'})
+        .eq('id', deliveryOrderId).eq('pharmacy_id', pharmacyId).eq('status', 'pending')
+        .select('id,status').maybeSingle();
+      if (error) throw new Error('Could not mark the order ready.');
+      if (!data) throw new Error('That order is not pending or does not belong to this pharmacy.');
+      return {orderCode: data.id.slice(0, 8), status: data.status};
+    },
+  });
+
+  return [listPendingOrders, markOrderReady];
+}
+
+/** Pharmacy assistant: delivery information and pharmacy-owned stock/order actions. */
+export function createDispatcherAgent(database: SupabaseClient, pharmacyId: string): LlmAgent {
   return new LlmAgent({
     name: 'dispatcher_agent',
     model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite',
-    description: 'Answers questions about delivery status, volume, and driver performance for the authenticated workspace.',
-    instruction: `You help pharmacy staff understand delivery activity and performance.
+    description: 'Answers pharmacy delivery questions and manages this pharmacy’s stock and order readiness.',
+    instruction: `You help pharmacy staff understand delivery activity and manage their own stock and pending orders.
       Use get_delivery_analytics for questions about totals, delivered item counts, status counts, or which drivers completed the most deliveries.
       Use list_ready_delivery_orders for questions about the current ready queue.
-      The tools only return information the signed-in user is allowed to see. Use the returned data for factual answers; do not guess missing metrics.
+      Use list_pharmacy_stock before referring to a medication by ID. Use create_pharmacy_stock_item only when explicitly asked to create a new medication item. Use add_pharmacy_stock_quantity when explicitly asked to add units to an existing item; this adds units rather than setting a final total. If a medication name or dosage is ambiguous, ask which one.
+      Use list_my_pending_delivery_orders before marking one ready. Mark it ready only on a clear request and only if it is pending and belongs to this pharmacy. Do not create delivery orders, assign drivers, or accept deliveries.
+      The tools are scoped to the signed-in pharmacy and use its authenticated database permissions. Use their returned data for facts; never guess or claim a change succeeded unless its tool succeeds.
       Each delivery order represents one item in this MVP, so items_delivered is the number of completed orders.
       Explain that driver rankings count completed deliveries. If the data has no completed deliveries, say so instead of naming a top driver.
-      You are read-only: never claim that you assigned a driver or changed an order.
-      Do not request or reveal patient information, prescription references, or delivery addresses.`,
-    tools: [deliveryAnalyticsTool(database), readyQueueTool(database)],
+      Never request or reveal patient information, prescription contents, prescription references, or delivery addresses.`,
+    tools: [
+      deliveryAnalyticsTool(database),
+      readyQueueTool(database),
+      ...pharmacyInventoryTools(database, pharmacyId),
+      ...pharmacyOrderTools(database, pharmacyId),
+    ],
   });
 }
 
@@ -99,6 +196,7 @@ export function createDriverAgent(database: SupabaseClient, driverId: string): L
         in_progress_count: counts[2].count ?? 0,
         delivered_count: counts[3].count ?? 0,
         recent_assignments: (recentOrders ?? []).map((order) => ({
+          id: order.id,
           order: order.id.slice(0, 8),
           status: order.status,
           created_at: order.created_at,
@@ -107,16 +205,81 @@ export function createDriverAgent(database: SupabaseClient, driverId: string): L
     },
   });
 
+  const listAvailableDeliveries = new FunctionTool({
+    name: 'list_available_deliveries',
+    description: 'Lists ready, unassigned delivery IDs and short order codes visible to drivers. It does not return medication or delivery details.',
+    parameters: z.object({}),
+    execute: async () => {
+      const {data, error} = await database.from('delivery_orders')
+        .select('id,created_at').eq('status', 'ready').is('driver_id', null)
+        .order('created_at', {ascending: true}).limit(50);
+      if (error) throw new Error('Could not load available deliveries.');
+      return (data ?? []).map((order) => ({
+        id: order.id,
+        orderCode: order.id.slice(0, 8),
+        createdAt: order.created_at,
+      }));
+    },
+  });
+
+  const acceptDelivery = new FunctionTool({
+    name: 'accept_delivery',
+    description: 'Atomically accepts one available ready delivery for the signed-in driver. Requires the exact ID returned by list_available_deliveries.',
+    parameters: z.object({deliveryOrderId: z.string().uuid()}),
+    execute: async ({deliveryOrderId}) => {
+      const {data, error} = await database.rpc('accept_delivery_order', {
+        p_delivery_order_id: deliveryOrderId,
+      });
+      if (error) throw new Error(error.code === 'P0002'
+        ? 'That delivery is no longer available; refresh the available list.'
+        : 'Could not accept the delivery.');
+      return {orderCode: data.id.slice(0, 8), status: data.status};
+    },
+  });
+
+  const updateAssignedDelivery = (
+    name: string,
+    description: string,
+    previousStatus: 'ready' | 'picked_up',
+    nextStatus: 'picked_up' | 'delivered',
+  ) => new FunctionTool({
+    name,
+    description,
+    parameters: z.object({deliveryOrderId: z.string().uuid()}),
+    execute: async ({deliveryOrderId}) => {
+      const {data, error} = await database.from('delivery_orders').update({status: nextStatus})
+        .eq('id', deliveryOrderId).eq('driver_id', driverId).eq('status', previousStatus)
+        .select('id,status').maybeSingle();
+      if (error) throw new Error(`Could not mark the delivery ${nextStatus.replace('_', ' ')}.`);
+      if (!data) throw new Error('That order is not assigned to you or is not in the required status.');
+      return {orderCode: data.id.slice(0, 8), status: data.status};
+    },
+  });
+
+  const markPickedUp = updateAssignedDelivery(
+    'mark_delivery_picked_up',
+    'Marks one of the signed-in driver’s ready assigned deliveries as picked up. Requires an exact delivery ID from the driver’s route.',
+    'ready',
+    'picked_up',
+  );
+  const markDelivered = updateAssignedDelivery(
+    'mark_delivery_delivered',
+    'Marks one of the signed-in driver’s picked-up deliveries as delivered. Requires an exact delivery ID from the driver’s route.',
+    'picked_up',
+    'delivered',
+  );
+
   return new LlmAgent({
     name: 'driver_assistant_agent',
     model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite',
-    description: 'Helps a delivery driver understand their assigned route and available work.',
-    instruction: `You help the signed-in driver understand their delivery workload.
+    description: 'Helps a delivery driver manage available pickups and assigned delivery statuses.',
+    instruction: `You help the signed-in driver understand and update their delivery workload.
       Use get_my_delivery_route for questions about available deliveries, assigned work, progress, or completed deliveries.
       Only discuss the current driver's assignments and the number of unassigned ready deliveries. Do not claim to know another driver's workload.
-      The tool intentionally does not return addresses, patient information, or prescription details. Direct the driver to the delivery card for authorized pickup details.
-      You are read-only: do not claim to accept, update, or complete an order.`,
-    tools: [getDriverRoute],
+      Use list_available_deliveries to identify an order before accepting it. The driver may identify an order by its short code; pass the exact matching ID returned by the tool to the action tool. Ask which order if the request is ambiguous.
+      Accept, mark picked up, or mark delivered only when the driver clearly asks for that action. Follow the delivery lifecycle in order, and never claim a change succeeded unless the tool succeeds.
+      The tools only return orders and status for this driver or unassigned ready work. They do not return addresses, patient information, medication names, or prescription details. Direct the driver to the delivery card for authorized pickup details.`,
+    tools: [getDriverRoute, listAvailableDeliveries, acceptDelivery, markPickedUp, markDelivered],
   });
 }
 

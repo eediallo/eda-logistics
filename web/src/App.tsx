@@ -280,7 +280,11 @@ export function App() {
         </section>
         <aside className="right-column">
           {profile.role === 'pharmacy' && <InventoryPanel busy={busy} medications={medications} onUpdateMedication={(id, stockCount) => runAction(() => request(`/api/inventory/${id}`, {method: 'PATCH', body: JSON.stringify({stockCount})}))} onAddMedication={(input) => runAction(() => request('/api/inventory', {method: 'POST', body: JSON.stringify(input)}))} onAddPrescription={(input) => runAction(() => request('/api/prescriptions', {method: 'POST', body: JSON.stringify(input)}))}/>}
-          <AssistantPanel role={profile.role} onAsk={(message) => request('/api/assistant/dispatch', {method: 'POST', body: JSON.stringify({message})})}/>
+          <AssistantPanel role={profile.role} onAsk={async (message) => {
+            const result = await request('/api/assistant/dispatch', {method: 'POST', body: JSON.stringify({message})});
+            setRefreshKey((value) => value + 1);
+            return result;
+          }}/>
           <section className="panel notification-panel"><div className="panel-header"><div><p className="eyebrow">UPDATES</p><h3>Notifications</h3></div><span className="notification-count">{notifications.filter((item) => !item.read_at).length}</span></div>
             {notifications.length === 0 ? <p className="muted small-copy">Milestone updates will appear here.</p> : <div className="notification-list">{notifications.map((item) => <button className={`notification-item ${item.read_at ? '' : 'notification-unread'}`} key={item.id} onClick={() => !item.read_at && void markNotificationRead(item)}>
               <span className="notification-dot"/><span className="notification-text"><b>{item.title}</b><small>{item.body}</small><time>{new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</time></span></button>)}</div>}
@@ -496,11 +500,11 @@ function AssistantPanel({role, onAsk}: {role: Role; onAsk: (message: string) => 
   const description = role === 'admin'
     ? 'Ask about workspace delivery performance, top drivers, and account roles.'
     : role === 'driver'
-      ? 'Ask about available pickups, your assigned deliveries, and your progress.'
-      : 'Ask about delivery counts, completed items, top drivers, or the ready queue.';
-  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK {label}</p><h3>Ask about deliveries</h3></div></div>
+      ? 'Ask about your route, accept a delivery, or update its pickup and delivery status.'
+      : 'Ask about delivery performance, create or restock medication items, and mark pending orders ready.';
+  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK {label}</p><h3>{role === 'admin' ? 'Ask about operations' : 'Ask or give an instruction'}</h3></div></div>
     <p className="assistant-desc">{description}</p>
-    <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} aria-label="Ask about deliveries"/>
+    <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} aria-label="Ask the assistant"/>
     <button className="button button-dark full-width" disabled={asking || !message.trim()} onClick={() => void ask()}>{asking ? 'Checking deliveries…' : 'Ask assistant'} <span>↗</span></button>
     {assistantError && <p className="assistant-answer" role="alert">{assistantError}</p>}
     {answer && <p className="assistant-answer">{answer}</p>}
