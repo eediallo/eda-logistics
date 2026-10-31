@@ -1,1 +1,45 @@
-# eda-logistics
+# Pharmacy Delivery MVP
+
+TypeScript MVP for pharmacy delivery workflows using Supabase, Google ADK, React, and Kafka.
+
+## Phase 1: Database
+
+The migrations in `supabase/migrations/` create Auth-linked profiles, pharmacy inventory, delivery orders, driver location history, RLS policies, and a transactional event outbox. Signup can assign only `pharmacy` or `driver`; `admin` can be assigned only by an existing admin or a trusted initial bootstrap.
+
+Install and start Docker, then run `./tools/start_local.sh` to create the local Supabase stack and apply pending migrations without clearing existing local data. The script uses an installed Supabase CLI or downloads it through `npx` if needed. Use `--reset` only when you want to erase the local database and reapply every migration.
+
+## Local setup
+
+Copy `.env.example` to `.env` and add your Gemini API key. When it starts local Supabase, `tools/start_local.sh` reads the local API URL and keys from the Supabase CLI and passes them to the app without writing them to a file. If you connect to an already-running/remote Supabase project with `--no-supabase`, fill in the Supabase variables in `.env` too. Keep service-role and Gemini keys server-side; never expose them to the browser.
+
+Users can create an account in the dashboard and choose Pharmacy or Driver. An existing admin can change account roles from the Administration screen. Bootstrap the first local admin once in Supabase Studio SQL Editor after creating that account through the UI:
+
+```sql
+update public.profiles set role = 'admin' where email = lower('admin@example.com');
+```
+
+Sign out and back in as that account to open role management. Self-service signup cannot grant the `admin` role.
+
+Start the local Supabase stack, Kafka broker, API, dashboard, and notification worker:
+
+```sh
+npm install
+./tools/start_local.sh
+```
+
+Use `./tools/start_local.sh --reset` to reset the local database and reapply migrations. Resetting erases local database data. For separate terminal processes, `docker compose up -d` and `npm run dev` start Kafka and the API/dashboard; run `npm run worker` in another terminal.
+
+The API exposes `/health`, `/api/orders`, pharmacy inventory and prescription-reference endpoints, order readiness/acceptance/pickup/completion endpoints, driver location updates, role-scoped analytics, and a read-only ADK dispatch assistant at `/api/assistant/dispatch`. Creating an order checks and decrements stock in one database transaction. Prescription mappings contain only opaque external references; prescription contents and clinical verification remain in the pharmacy's existing system. The browser app uses Supabase Auth and has separate pharmacy and driver views.
+
+User requests are authenticated with Supabase access tokens. Database requests use the caller's token and rely on RLS. The assistant's queue tool uses that same scoped database client and cannot assign drivers or change delivery state.
+
+## Current workflow
+
+1. A pharmacy creates an order, which starts as `pending`.
+2. The pharmacy marks it `ready`; the database writes a `medication.ready` outbox event.
+3. A driver atomically accepts an unassigned ready order.
+4. The driver marks it picked up and records location updates.
+5. The driver marks it delivered; the database writes a `delivery.completed` outbox event.
+6. The Kafka worker publishes outbox events and records deduplicated in-app notifications.
+
+Driver-visible queue rows do not contain medication details or delivery addresses. A separate table and RLS policy reveal those details only to the pharmacy and the driver assigned to that delivery.
