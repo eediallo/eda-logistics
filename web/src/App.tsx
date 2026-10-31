@@ -44,12 +44,14 @@ export function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [profileRetryKey, setProfileRetryKey] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({data}) => setSession(data.session));
     const {data: {subscription}} = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setProfile(null);
+      setError('');
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -102,9 +104,12 @@ export function App() {
         if (!active) return;
         if (profileError) setError(profileError.message);
         else setProfile(data as Profile);
+      })
+      .catch((cause) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Could not load your account profile.');
       });
     return () => { active = false; };
-  }, [session]);
+  }, [session, profileRetryKey]);
 
   useEffect(() => {
     if (!session || !profile?.role) return;
@@ -203,7 +208,20 @@ export function App() {
       signupRole={signupRole} setSignupRole={setSignupRole} onSubmit={submitAuth} busy={busy}
       error={error} message={authMessage} />;
   }
-  if (!profile) return <main className="loading-screen">Loading your workspace…</main>;
+  if (!profile) {
+    return <main className="loading-screen"><section className="pending-card">
+      <span className="brand-mark">G</span><p className="eyebrow">GOODROUTE WORKSPACE</p>
+      <h1>{error ? 'Couldn’t load your workspace' : 'Loading your workspace…'}</h1>
+      {error && <>
+        <p role="alert">{error}</p>
+        <button className="button button-primary" onClick={() => {
+          setError('');
+          setProfileRetryKey((value) => value + 1);
+        }}>Try again</button>
+        <button className="button button-secondary" onClick={() => void supabase.auth.signOut()}>Sign out</button>
+      </>}
+    </section></main>;
+  }
   if (!profile.role) {
     return <main className="loading-screen"><section className="pending-card">
       <span className="brand-mark">G</span><p className="eyebrow">GOODROUTE WORKSPACE</p>
