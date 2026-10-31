@@ -1,0 +1,27 @@
+{
+  "name": "eda-logistics",
+  "version": "1.0.0",
+  "description": "",
+  "main": "agent.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eediallo/eda-logistics.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/eediallo/eda-logistics/issues"
+  },
+  "homepage": "https://github.com/eediallo/eda-logistics#readme",
+  "dependencies": {
+    "@google/adk": "^2.4.0"
+  },
+  "devDependencies": {
+    "@google/adk-devtools": "^2.4.0"
+  }
+}
