@@ -155,6 +155,9 @@ if [[ "${START_SUPABASE}" == true ]]; then
     echo "Could not read the local Supabase API URL and keys from 'supabase status --output env'." >&2
     exit 1
   fi
+
+  echo "Preparing local demo accounts, inventory, and delivery orders..."
+  node --import tsx tools/seed_demo.ts
 fi
 
 if [[ "${START_KAFKA}" == true ]]; then

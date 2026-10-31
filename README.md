@@ -20,6 +20,16 @@ update public.profiles set role = 'admin' where email = lower('admin@example.com
 
 Sign out and back in as that account to open role management. Self-service signup cannot grant the `admin` role.
 
+When using the local stack, `tools/start_local.sh` also creates demo Pharmacy, Driver, and Admin accounts, sample inventory, prescription references, and delivery orders. Sign in with any of these local-only accounts (they all use the same password):
+
+| Role | Email |
+| --- | --- |
+| Pharmacy | `demo.pharmacy@example.com` |
+| Driver | `demo.driver@example.com` |
+| Admin | `demo.admin@example.com` |
+
+Password: `DemoDelivery123!`. These demo accounts are created only for a local Supabase URL and must never be used with a hosted or shared project. The Admin account can assign roles in the UI. `./tools/start_local.sh --reset` recreates the demo data after clearing the local database.
+
 Start the local Supabase stack, Kafka broker, API, dashboard, and notification worker:
 
 ```sh
