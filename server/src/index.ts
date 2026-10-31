@@ -363,7 +363,14 @@ app.post('/api/assistant/dispatch', async (request, reply) => {
 
 app.setErrorHandler((error, request, reply) => {
   request.log.error({err: error}, 'Unhandled request error');
-  return reply.code(500).send({error: 'An unexpected server error occurred.'});
+  const errorStatusCode = error instanceof Error && 'statusCode' in error ? error.statusCode : undefined;
+  const statusCode = typeof errorStatusCode === 'number' && errorStatusCode >= 400 && errorStatusCode < 500
+    ? errorStatusCode
+    : 500;
+  const message = statusCode < 500 && error instanceof Error
+    ? error.message
+    : 'An unexpected server error occurred.';
+  return reply.code(statusCode).send({error: message});
 });
 
 await app.listen({host: '0.0.0.0', port: env.PORT});

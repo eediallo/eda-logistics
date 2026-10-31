@@ -59,7 +59,7 @@ export function App() {
     const response = await fetch(`${apiBase}${path}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...(options.body == null ? {} : {'Content-Type': 'application/json'}),
         Authorization: `Bearer ${session.access_token}`,
         ...options.headers,
       },
