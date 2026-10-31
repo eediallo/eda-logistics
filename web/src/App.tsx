@@ -450,7 +450,7 @@ function OrderCard({role, order, busy, onAction, onLocation}: {role: Role; order
 }
 
 function AssistantPanel({busy, onAsk}: {busy: boolean; onAsk: (message: string) => Promise<unknown>}) {
-  const [message, setMessage] = useState('Which deliveries are ready for pickup?');
+  const [message, setMessage] = useState('How many items have been delivered, and who has completed the most deliveries?');
   const [answer, setAnswer] = useState('');
   async function ask() {
     try {
@@ -458,10 +458,10 @@ function AssistantPanel({busy, onAsk}: {busy: boolean; onAsk: (message: string) 
       setAnswer(result.answer);
     } catch { /* The shared dashboard alert shows request errors. */ }
   }
-  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK DISPATCH ASSISTANT</p><h3>Ask about your queue</h3></div></div>
-    <p className="assistant-desc">Get a quick, read-only summary of ready deliveries.</p>
+  return <section className="assistant-card"><div className="assistant-heading"><span className="assistant-icon">✳</span><div><p className="eyebrow">ADK DELIVERY ASSISTANT</p><h3>Ask about deliveries</h3></div></div>
+    <p className="assistant-desc">Ask about delivery counts, completed items, top drivers, or the ready queue.</p>
     <textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} aria-label="Ask about deliveries"/>
-    <button className="button button-dark full-width" disabled={busy || !message.trim()} onClick={() => void ask()}>{busy ? 'Checking queue…' : 'Ask assistant'} <span>↗</span></button>
+    <button className="button button-dark full-width" disabled={busy || !message.trim()} onClick={() => void ask()}>{busy ? 'Checking deliveries…' : 'Ask assistant'} <span>↗</span></button>
     {answer && <p className="assistant-answer">{answer}</p>}
   </section>;
 }
