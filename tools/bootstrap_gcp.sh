@@ -125,14 +125,14 @@ fi
 gcloud artifacts repositories add-iam-policy-binding "$ARTIFACT_REPOSITORY" \
   --location "$REGION" --project "$PROJECT_ID" \
   --member="serviceAccount:${DEPLOYER_SERVICE_ACCOUNT}" \
-  --role='roles/artifactregistry.writer' >/dev/null
+  --role='roles/artifactregistry.writer' --condition=None >/dev/null
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:${DEPLOYER_SERVICE_ACCOUNT}" \
-  --role='roles/run.admin' >/dev/null
+  --role='roles/run.admin' --condition=None >/dev/null
 gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --member="serviceAccount:${DEPLOYER_SERVICE_ACCOUNT}" \
-  --role='roles/iam.serviceAccountUser' >/dev/null
+  --role='roles/iam.serviceAccountUser' --condition=None >/dev/null
 
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
 if ! gcloud iam workload-identity-pools describe "$POOL_ID" \
@@ -163,7 +163,8 @@ fi
 gcloud iam service-accounts add-iam-policy-binding "$DEPLOYER_SERVICE_ACCOUNT" \
   --project "$PROJECT_ID" \
   --role='roles/iam.workloadIdentityUser' \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPOSITORY}" >/dev/null
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPOSITORY}" \
+  --condition=None >/dev/null
 
 ensure_secret() {
   local secret_name="$1" label="$2" secret_value versions
@@ -182,7 +183,7 @@ ensure_secret() {
   gcloud secrets add-iam-policy-binding "$secret_name" \
     --project "$PROJECT_ID" \
     --member="serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
-    --role='roles/secretmanager.secretAccessor' >/dev/null
+    --role='roles/secretmanager.secretAccessor' --condition=None >/dev/null
 }
 
 ensure_secret 'supabase-service-role-key' 'Supabase server-side service_role/secret key'
