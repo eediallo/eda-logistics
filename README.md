@@ -39,9 +39,9 @@ npm install
 
 Use `./tools/start_local.sh --reset` to reset the local database and reapply migrations. Resetting erases local database data. For separate terminal processes, `docker compose up -d` and `npm run dev` start Kafka and the API/dashboard; run `npm run worker` in another terminal.
 
-The API exposes `/health`, `/api/orders`, pharmacy inventory and prescription-reference endpoints, order readiness/acceptance/pickup/completion endpoints, driver location updates, role-scoped analytics, and a read-only ADK assistant at `/api/assistant/dispatch`. The Pharmacy assistant summarizes its delivery counts and ready queue; the Driver assistant summarizes available work and that driver's assignments; the Admin assistant reports workspace-wide delivery performance and account-role counts. Each assistant uses the caller-scoped database client and cannot change delivery or account state. Creating an order checks and decrements stock in one database transaction. Prescription mappings contain only opaque external references; prescription contents and clinical verification remain in the pharmacy's existing system. The browser app uses Supabase Auth and has separate pharmacy and driver views.
+The API exposes `/health`, `/api/orders`, pharmacy inventory and prescription-reference endpoints, order readiness/acceptance/pickup/completion endpoints, driver location updates, role-scoped analytics, and role-specific ADK assistants at `/api/assistant/dispatch`. The Pharmacy assistant answers delivery questions, creates or restocks medication items, and marks its pending orders ready. The Driver assistant answers route questions, accepts available deliveries, and marks assigned deliveries picked up or delivered. The Admin assistant reports workspace-wide delivery performance and account-role counts and remains read-only. Assistant tools use the caller-scoped database client and rely on role checks and row-level security. Creating an order checks and decrements stock in one database transaction. Prescription mappings contain only opaque external references; prescription contents and clinical verification remain in the pharmacy's existing system. The browser app uses Supabase Auth and has separate pharmacy and driver views.
 
-User requests are authenticated with Supabase access tokens. Database requests use the caller's token and rely on RLS. Each role-specific assistant uses that same scoped database client; the driver assistant only summarizes the signed-in driver's assignments and public ready-work counts.
+User requests are authenticated with Supabase access tokens. Database requests use the caller's token and rely on RLS. Each role-specific assistant uses that same scoped database client; pharmacy tools can only change the caller’s own inventory and pending orders, driver tools can only claim unassigned ready orders or advance that driver’s assigned orders, and the admin assistant remains read-only.
 
 ## Current workflow
 
@@ -58,23 +58,14 @@ Driver-visible queue rows do not contain medication details or delivery addresse
 
 The GitHub Actions workflow in `.github/workflows/deploy-gcp.yml` deploys on every push to `main` (and supports manual runs). It applies pending Supabase migrations, builds one container, deploys the web app and API together as a public Cloud Run service, and deploys the Kafka consumer as a one-instance Cloud Run Worker Pool. The browser and API share one origin; API routes still require Supabase access tokens. Supabase remains the database and Auth provider.
 
-The workflow targets a managed Kafka service with KafkaJS-compatible TLS/SCRAM authentication, such as Confluent Cloud. Create the `delivery.milestones` topic and grant the worker credentials permission to produce and consume that topic. The current local Docker Kafka remains plaintext; the worker uses TLS/SCRAM when `KAFKA_SECURITY_PROTOCOL=sasl_ssl`. Google Cloud's Managed Service for Apache Kafka can also work, but its non-Java OAuth setup needs an auth sidecar, so this initial workflow uses a KafkaJS-native SCRAM provider.
+The workflow targets a managed Kafka service with KafkaJS-compatible TLS/SCRAM authentication, such as Aiven or Confluent Cloud. Create the `delivery.milestones` topic and grant the worker credentials permission to produce and consume that topic. The current local Docker Kafka remains plaintext; the worker uses TLS/SCRAM when `KAFKA_SECURITY_PROTOCOL=sasl_ssl`. Google Cloud's Managed Service for Apache Kafka can also work, but its non-Java OAuth setup needs an auth sidecar, so this initial workflow uses a KafkaJS-native SCRAM provider.
 
-Before enabling the workflow:
+### One-time cloud bootstrap
 
-1. In GCP, enable Cloud Run, Artifact Registry, Secret Manager, and IAM Credentials APIs. Create a Docker repository in Artifact Registry.
-2. Create a GitHub Workload Identity Federation provider restricted to this repository's `main` branch, plus a deployer service account. Give the deployer permission to push to the Artifact Registry repository and deploy Cloud Run services/worker pools, and permission to act as the runtime service account. Use federation instead of a downloadable service-account key.
-3. Create a Cloud Run runtime service account. Grant it Secret Manager Secret Accessor on the four secrets below.
-4. Create these Secret Manager secrets and add values: `supabase-service-role-key`, `gemini-api-key`, `kafka-username`, and `kafka-password`.
-5. Add the following GitHub Actions **variables**:
+Run `tools/bootstrap_gcp.sh` once from a terminal where you are signed in to both Google Cloud (`gcloud auth login`) and GitHub (`gh auth login`). It creates/enables the GCP APIs, Artifact Registry Docker repository, deployer and runtime service accounts, GitHub Workload Identity Federation restricted to this repository's `main` branch, and the four Secret Manager entries. It also sets the GitHub Actions variables required by the workflow. It never modifies the existing `SUPABASE_ACCESS_TOKEN` or `SUPABASE_DB_PASSWORD` GitHub secrets, and it does not create service-account JSON keys.
 
-   - `GCP_PROJECT_ID`, `GCP_REGION`, and `GCP_ARTIFACT_REGISTRY_REPOSITORY`
-   - `GCP_WORKLOAD_IDENTITY_PROVIDER` (the full provider resource name)
-   - `GCP_DEPLOYER_SERVICE_ACCOUNT` and `GCP_RUNTIME_SERVICE_ACCOUNT` (service account emails)
-   - `SUPABASE_PROJECT_REF`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`
-   - `GEMINI_MODEL` (for example, `gemini-3.5-flash-lite`)
-   - `KAFKA_BROKERS` (the managed Kafka bootstrap broker) and `KAFKA_SASL_MECHANISM` (`scram-sha-256` or `scram-sha-512`)
+The script asks for the project ID, region, GitHub `OWNER/NAME`, hosted Supabase URL/ref/public key, model name, and Aiven broker/mechanism. It asks for the Supabase server-side key, Gemini API key, and Kafka username/password with input hidden, then stores them in Google Secret Manager. Existing Secret Manager values are preserved. Ensure the Kafka service is running, create the `delivery.milestones` topic, and grant the Aiven user produce/consume access before supplying its credentials. The GCP project must have billing enabled, and your Google identity needs permission to enable APIs, create resources, and grant IAM roles.
 
-6. Add these GitHub Actions **secrets**: `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`. The migration step runs `supabase db push --linked` before deploying; keep production migrations additive and review them before merging to `main`.
+The workflow still needs the existing GitHub Actions secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; the migration step runs `supabase db push --linked` before deploying. Keep production migrations additive and review them before merging to `main`.
 
 The deployment workflow does not seed demo users or sample records into the hosted database. Demo data is only created by the local startup script.
