@@ -99,15 +99,17 @@ export function App() {
   useEffect(() => {
     if (!session) return;
     let active = true;
-    supabase.from('profiles').select('id,email,role,display_name').eq('id', session.user.id).single()
-      .then(({data, error: profileError}) => {
+    void (async () => {
+      try {
+        const {data, error: profileError} = await supabase.from('profiles')
+          .select('id,email,role,display_name').eq('id', session.user.id).single();
         if (!active) return;
         if (profileError) setError(profileError.message);
         else setProfile(data as Profile);
-      })
-      .catch((cause) => {
+      } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : 'Could not load your account profile.');
-      });
+      }
+    })();
     return () => { active = false; };
   }, [session, profileRetryKey]);
 
