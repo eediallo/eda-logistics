@@ -186,10 +186,34 @@ ensure_secret() {
     --role='roles/secretmanager.secretAccessor' --condition=None >/dev/null
 }
 
+ensure_file_secret() {
+  local secret_name="$1" label="$2" cert_path versions
+  if ! gcloud secrets describe "$secret_name" --project "$PROJECT_ID" >/dev/null 2>&1; then
+    gcloud secrets create "$secret_name" --replication-policy=automatic --project "$PROJECT_ID"
+  fi
+  versions="$(gcloud secrets versions list "$secret_name" --project "$PROJECT_ID" --filter='state=ENABLED' --format='value(name)' 2>/dev/null || true)"
+  if [[ -z "$versions" ]]; then
+    prompt cert_path "$label (local PEM file path)"
+    if [[ ! -f "$cert_path" ]]; then
+      printf 'Certificate file not found: %s\n' "$cert_path" >&2
+      exit 1
+    fi
+    gcloud secrets versions add "$secret_name" --data-file="$cert_path" --project "$PROJECT_ID"
+    unset cert_path
+  else
+    printf 'Keeping existing Secret Manager value for %s.\n' "$secret_name"
+  fi
+  gcloud secrets add-iam-policy-binding "$secret_name" \
+    --project "$PROJECT_ID" \
+    --member="serviceAccount:${RUNTIME_SERVICE_ACCOUNT}" \
+    --role='roles/secretmanager.secretAccessor' --condition=None >/dev/null
+}
+
 ensure_secret 'supabase-service-role-key' 'Supabase server-side service_role/secret key'
 ensure_secret 'gemini-api-key' 'Gemini API key'
 ensure_secret 'kafka-username' 'Aiven Kafka service username'
 ensure_secret 'kafka-password' 'Aiven Kafka service password'
+ensure_file_secret 'kafka-ca-cert' 'Aiven Kafka CA certificate'
 
 WIF_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 set_variable() {

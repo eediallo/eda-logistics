@@ -11,6 +11,7 @@ const envSchema = z.object({
   KAFKA_SASL_MECHANISM: z.enum(['plain', 'scram-sha-256', 'scram-sha-512']).optional(),
   KAFKA_USERNAME: z.string().optional(),
   KAFKA_PASSWORD: z.string().optional(),
+  KAFKA_CA_CERT: z.string().optional(),
   WEB_ORIGIN: z.string().url().default('http://localhost:5173'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 }).superRefine((value, context) => {

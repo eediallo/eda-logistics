@@ -135,4 +135,4 @@ jobs:
             --command node \
             --args build/server/src/worker.js \
             --set-env-vars="SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},KAFKA_BROKERS=${KAFKA_BROKERS},KAFKA_SECURITY_PROTOCOL=sasl_ssl,KAFKA_SASL_MECHANISM=${KAFKA_SASL_MECHANISM},GEMINI_MODEL=${GEMINI_MODEL}" \
-            --set-secrets="SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GEMINI_API_KEY=gemini-api-key:latest,KAFKA_USERNAME=kafka-username:latest,KAFKA_PASSWORD=kafka-password:latest"
+            --set-secrets="SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GEMINI_API_KEY=gemini-api-key:latest,KAFKA_USERNAME=kafka-username:latest,KAFKA_PASSWORD=kafka-password:latest,KAFKA_CA_CERT=kafka-ca-cert:latest"

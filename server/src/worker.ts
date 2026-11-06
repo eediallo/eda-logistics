@@ -1,4 +1,5 @@
 import {hostname} from 'node:os';
+import {rootCertificates} from 'node:tls';
 import {setTimeout as delay} from 'node:timers/promises';
 import {Kafka, type EachMessagePayload} from 'kafkajs';
 import {createClient} from '@supabase/supabase-js';
@@ -20,10 +21,13 @@ const database = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
 function kafkaSecurityOptions() {
   if (env.KAFKA_SECURITY_PROTOCOL !== 'sasl_ssl') return {};
   const credentials = {username: env.KAFKA_USERNAME!, password: env.KAFKA_PASSWORD!};
+  const ssl = env.KAFKA_CA_CERT
+    ? {rejectUnauthorized: true, ca: [...rootCertificates, env.KAFKA_CA_CERT]}
+    : true;
   switch (env.KAFKA_SASL_MECHANISM) {
-    case 'plain': return {ssl: true, sasl: {mechanism: 'plain' as const, ...credentials}};
-    case 'scram-sha-256': return {ssl: true, sasl: {mechanism: 'scram-sha-256' as const, ...credentials}};
-    case 'scram-sha-512': return {ssl: true, sasl: {mechanism: 'scram-sha-512' as const, ...credentials}};
+    case 'plain': return {ssl, sasl: {mechanism: 'plain' as const, ...credentials}};
+    case 'scram-sha-256': return {ssl, sasl: {mechanism: 'scram-sha-256' as const, ...credentials}};
+    case 'scram-sha-512': return {ssl, sasl: {mechanism: 'scram-sha-512' as const, ...credentials}};
     default: throw new Error('A supported Kafka SASL mechanism is required.');
   }
 }
