@@ -40,6 +40,10 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
+          if [[ -z "$SUPABASE_DB_URL" ]]; then
+            echo "GitHub Actions secret SUPABASE_DB_URL is missing or empty. Add the Supabase Session pooler connection string in repository Actions secrets."
+            exit 1
+          fi
           supabase db push --remote="$SUPABASE_DB_URL" --yes
 
       - name: Authenticate to Google Cloud
