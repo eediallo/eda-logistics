@@ -27,6 +27,33 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Validate deployment configuration
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ARTIFACT_REGISTRY_REPOSITORY: ${{ vars.GCP_ARTIFACT_REGISTRY_REPOSITORY }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOYER_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+          GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          KAFKA_BROKERS: ${{ vars.KAFKA_BROKERS }}
+          KAFKA_SASL_MECHANISM: ${{ vars.KAFKA_SASL_MECHANISM }}
+        run: |
+          missing=()
+          for name in GCP_PROJECT_ID GCP_REGION GCP_ARTIFACT_REGISTRY_REPOSITORY \
+            GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOYER_SERVICE_ACCOUNT \
+            GCP_RUNTIME_SERVICE_ACCOUNT SUPABASE_PROJECT_REF SUPABASE_URL \
+            SUPABASE_ANON_KEY GEMINI_MODEL KAFKA_BROKERS KAFKA_SASL_MECHANISM; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+          if ((${#missing[@]})); then
+            printf 'Missing GitHub Actions variable(s): %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
