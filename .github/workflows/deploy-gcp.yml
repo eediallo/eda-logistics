@@ -113,7 +113,7 @@ jobs:
             --memory 1Gi \
             --timeout 300 \
             --max 10 \
-            --set-env-vars="PORT=8080,SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},GEMINI_MODEL=${GEMINI_MODEL}" \
+            --set-env-vars="SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},GEMINI_MODEL=${GEMINI_MODEL}" \
             --set-secrets="SUPABASE_SERVICE_ROLE_KEY=supabase-service-role-key:latest,GEMINI_API_KEY=gemini-api-key:latest"
 
       - name: Deploy Kafka worker pool
