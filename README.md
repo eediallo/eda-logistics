@@ -81,7 +81,7 @@ The workflow expects a managed Kafka service with KafkaJS-compatible TLS/SCRAM a
 
 Run `tools/bootstrap_gcp.sh` once while authenticated with `gcloud auth login` and `gh auth login`. It configures GCP APIs, Artifact Registry, service accounts, repository-restricted GitHub Workload Identity Federation, Secret Manager entries, and workflow variables. It prompts for configuration and hides secret input. The GCP project needs billing enabled and your Google identity needs permission to create resources and grant IAM roles.
 
-The deployment workflow also requires existing GitHub Actions secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; it runs `supabase db push --linked` before deployment. Review production migrations and keep them additive before merging to `main`. Hosted deployment does not seed demo accounts or sample data.
+The deployment workflow requires GitHub Actions secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_URL`. Set `SUPABASE_DB_URL` to the project's Session pooler connection string from Supabase's Connect dialog, with the password filled in; use port `5432` for session mode, which supports IPv4-only runners. The workflow applies migrations with `supabase db push --remote="$SUPABASE_DB_URL" --yes` before deployment. Review production migrations and keep them additive before merging to `main`. Hosted deployment does not seed demo accounts or sample data.
 
 ## Security
 
