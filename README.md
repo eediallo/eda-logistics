@@ -1,26 +1,49 @@
 # Pharmacy Delivery MVP
 
-TypeScript MVP for pharmacy delivery workflows using Supabase, Google ADK, React, and Kafka.
+A TypeScript application for coordinating prescription deliveries between pharmacies and drivers. It combines a React dashboard, a Fastify API, Supabase authentication and PostgreSQL, role-specific Google ADK assistants, and Kafka-based delivery notifications.
 
-## Phase 1: Database
+## Features
 
-The migrations in `supabase/migrations/` create Auth-linked profiles, pharmacy inventory, delivery orders, driver location history, RLS policies, and a transactional event outbox. Signup can assign only `pharmacy` or `driver`; `admin` can be assigned only by an existing admin or a trusted initial bootstrap.
+- Pharmacy inventory and delivery order management, including stock checks and updates.
+- Driver pickup queue, delivery status updates, and location recording.
+- Admin role management and delivery analytics.
+- Pharmacy, driver, and read-only admin AI assistants.
+- Row-level security (RLS) for role-scoped access to delivery and account data.
+- Asynchronous milestone notifications using a database outbox and Kafka.
 
-Install and start Docker, then run `./tools/start_local.sh` to create the local Supabase stack and apply pending migrations without clearing existing local data. The script uses an installed Supabase CLI or downloads it through `npx` if needed. Use `--reset` only when you want to erase the local database and reapply every migration.
+Prescription mappings store opaque references only. Prescription contents and clinical verification remain in the pharmacy's existing system.
 
-## Local setup
+## Architecture
 
-Copy `.env.example` to `.env` and add your Gemini API key. When it starts local Supabase, `tools/start_local.sh` reads the local API URL and keys from the Supabase CLI and passes them to the app without writing them to a file. If you connect to an already-running/remote Supabase project with `--no-supabase`, fill in the Supabase variables in `.env` too. Keep service-role and Gemini keys server-side; never expose them to the browser.
+- `web/`: React, TypeScript, Vite, and Tailwind dashboard.
+- `server/`: Fastify API and Kafka notification worker.
+- `agent.ts`: role-specific assistants and their tools.
+- `supabase/migrations/`: database schema, RLS policies, and functions.
+- `tools/`: local startup, demo seeding, and Google Cloud bootstrap scripts.
 
-Users can create an account in the dashboard and choose Pharmacy or Driver. An existing admin can change account roles from the Administration screen. Bootstrap the first local admin once in Supabase Studio SQL Editor after creating that account through the UI:
+The browser authenticates with Supabase and sends access tokens to the API. User-scoped database requests rely on PostgreSQL RLS. A transactional outbox records delivery milestones; the worker publishes these to Kafka and records deduplicated in-app notifications.
 
-```sql
-update public.profiles set role = 'admin' where email = lower('admin@example.com');
-```
+## Run Locally
 
-Sign out and back in as that account to open role management. Self-service signup cannot grant the `admin` role.
+Requirements: Node.js 22+, Docker, and an internet connection for the Supabase CLI if it is not already installed.
 
-When using the local stack, `tools/start_local.sh` also creates demo Pharmacy, Driver, and Admin accounts, sample inventory, prescription references, and delivery orders. Sign in with any of these local-only accounts (they all use the same password):
+1. Copy `.env.example` to `.env` and add your Gemini API key.
+2. Start the local services:
+
+   ```sh
+   npm install
+   ./tools/start_local.sh
+   ```
+
+The startup script starts the local Supabase stack, applies pending migrations without clearing existing data, starts Kafka, and runs the API, dashboard, and notification worker. It reads local Supabase URLs and keys from the Supabase CLI without writing them to a file.
+
+To run processes separately, start Kafka and the API/dashboard with `docker compose up -d` and `npm run dev`, then run `npm run worker` in another terminal. For a production build, run `npm run build`.
+
+To connect to an already-running or hosted Supabase project instead, use `./tools/start_local.sh --no-supabase` and set the required Supabase variables in `.env`.
+
+### Local Demo Accounts
+
+The local startup script creates sample inventory, prescription references, orders, and these accounts. All use password `DemoDelivery123!`.
 
 | Role | Email |
 | --- | --- |
@@ -28,44 +51,38 @@ When using the local stack, `tools/start_local.sh` also creates demo Pharmacy, D
 | Driver | `demo.driver@example.com` |
 | Admin | `demo.admin@example.com` |
 
-Password: `DemoDelivery123!`. These demo accounts are created only for a local Supabase URL and must never be used with a hosted or shared project. The Admin account can assign roles in the UI. `./tools/start_local.sh --reset` recreates the demo data after clearing the local database.
+These accounts are created only for a local Supabase URL. Never use them with a hosted or shared project. To erase local database data and reapply all migrations, run `./tools/start_local.sh --reset`; this also recreates the demo data.
 
-Start the local Supabase stack, Kafka broker, API, dashboard, and notification worker:
+### Roles and Access
 
-```sh
-npm install
-./tools/start_local.sh
+Self-service signup can select Pharmacy or Driver, but cannot grant Admin. To bootstrap the first local admin, create an account through the UI, then run this once in Supabase Studio's SQL Editor:
+
+```sql
+update public.profiles set role = 'admin' where email = lower('admin@example.com');
 ```
 
-Use `./tools/start_local.sh --reset` to reset the local database and reapply migrations. Resetting erases local database data. For separate terminal processes, `docker compose up -d` and `npm run dev` start Kafka and the API/dashboard; run `npm run worker` in another terminal.
+Sign out and back in as that account to access role management. After bootstrap, an existing admin can change roles in the Administration screen.
 
-The API exposes `/health`, `/api/orders`, pharmacy inventory and prescription-reference endpoints, order readiness/acceptance/pickup/completion endpoints, driver location updates, role-scoped analytics, and role-specific ADK assistants at `/api/assistant/dispatch`. The Pharmacy assistant answers delivery questions, creates or restocks medication items, and marks its pending orders ready. The Driver assistant answers route questions, accepts available deliveries, and marks assigned deliveries picked up or delivered. The Admin assistant reports workspace-wide delivery performance and account-role counts and remains read-only. Assistant tools use the caller-scoped database client and rely on role checks and row-level security. Creating an order checks and decrements stock in one database transaction. Prescription mappings contain only opaque external references; prescription contents and clinical verification remain in the pharmacy's existing system. The browser app uses Supabase Auth and has separate pharmacy and driver views.
+## Delivery Workflow
 
-User requests are authenticated with Supabase access tokens. Database requests use the caller's token and rely on RLS. Each role-specific assistant uses that same scoped database client; pharmacy tools can only change the caller’s own inventory and pending orders, driver tools can only claim unassigned ready orders or advance that driver’s assigned orders, and the admin assistant remains read-only.
+1. A pharmacy creates an order, which starts as `pending`; the database checks and decrements stock in one transaction.
+2. The pharmacy marks the order `ready`, creating a `medication.ready` outbox event.
+3. A driver atomically accepts an unassigned ready order, marks it picked up, and can record location updates.
+4. The driver marks it delivered, creating a `delivery.completed` event.
+5. The Kafka worker publishes events and records in-app notifications.
 
-## Current workflow
-
-1. A pharmacy creates an order, which starts as `pending`.
-2. The pharmacy marks it `ready`; the database writes a `medication.ready` outbox event.
-3. A driver atomically accepts an unassigned ready order.
-4. The driver marks it picked up and records location updates.
-5. The driver marks it delivered; the database writes a `delivery.completed` outbox event.
-6. The Kafka worker publishes outbox events and records deduplicated in-app notifications.
-
-Driver-visible queue rows do not contain medication details or delivery addresses. A separate table and RLS policy reveal those details only to the pharmacy and the driver assigned to that delivery.
+Driver queue rows do not expose medication details or delivery addresses. RLS allows those details only to the pharmacy and the driver assigned to the delivery. Assistants use the caller-scoped database client and follow the same role and RLS restrictions; the admin assistant is read-only.
 
 ## Deploy to Google Cloud
 
-The GitHub Actions workflow in `.github/workflows/deploy-gcp.yml` deploys on every push to `main` (and supports manual runs). It applies pending Supabase migrations, builds one container, deploys the web app and API together as a public Cloud Run service, and deploys the Kafka consumer as a one-instance Cloud Run Worker Pool. The browser and API share one origin; API routes still require Supabase access tokens. Supabase remains the database and Auth provider.
+The GitHub Actions workflow at `.github/workflows/deploy-gcp.yml` deploys on pushes to `main` and supports manual runs. It applies pending Supabase migrations, builds one container, deploys the web app and API as a public Cloud Run service, and deploys the Kafka consumer as a one-instance Cloud Run Worker Pool. API routes still require Supabase access tokens; Supabase remains the database and Auth provider.
 
-The workflow targets a managed Kafka service with KafkaJS-compatible TLS/SCRAM authentication, such as Aiven or Confluent Cloud. Create the `delivery.milestones` topic and grant the worker credentials permission to produce and consume that topic. The current local Docker Kafka remains plaintext; the worker uses TLS/SCRAM when `KAFKA_SECURITY_PROTOCOL=sasl_ssl`. Google Cloud's Managed Service for Apache Kafka can also work, but its non-Java OAuth setup needs an auth sidecar, so this initial workflow uses a KafkaJS-native SCRAM provider.
+The workflow expects a managed Kafka service with KafkaJS-compatible TLS/SCRAM authentication (for example, Aiven or Confluent Cloud), with a `delivery.milestones` topic and worker credentials allowed to produce and consume. Local Docker Kafka uses plaintext; set `KAFKA_SECURITY_PROTOCOL=sasl_ssl` for the hosted TLS/SCRAM connection.
 
-### One-time cloud bootstrap
+Run `tools/bootstrap_gcp.sh` once while authenticated with `gcloud auth login` and `gh auth login`. It configures GCP APIs, Artifact Registry, service accounts, repository-restricted GitHub Workload Identity Federation, Secret Manager entries, and workflow variables. It prompts for configuration and hides secret input. The GCP project needs billing enabled and your Google identity needs permission to create resources and grant IAM roles.
 
-Run `tools/bootstrap_gcp.sh` once from a terminal where you are signed in to both Google Cloud (`gcloud auth login`) and GitHub (`gh auth login`). It creates/enables the GCP APIs, Artifact Registry Docker repository, deployer and runtime service accounts, GitHub Workload Identity Federation restricted to this repository's `main` branch, and the four Secret Manager entries. It also sets the GitHub Actions variables required by the workflow. It never modifies the existing `SUPABASE_ACCESS_TOKEN` or `SUPABASE_DB_PASSWORD` GitHub secrets, and it does not create service-account JSON keys.
+The deployment workflow also requires existing GitHub Actions secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; it runs `supabase db push --linked` before deployment. Review production migrations and keep them additive before merging to `main`. Hosted deployment does not seed demo accounts or sample data.
 
-The script asks for the project ID, region, GitHub `OWNER/NAME`, hosted Supabase URL/ref/public key, model name, and Aiven broker/mechanism. It asks for the Supabase server-side key, Gemini API key, and Kafka username/password with input hidden, then stores them in Google Secret Manager. Existing Secret Manager values are preserved. Ensure the Kafka service is running, create the `delivery.milestones` topic, and grant the Aiven user produce/consume access before supplying its credentials. The GCP project must have billing enabled, and your Google identity needs permission to enable APIs, create resources, and grant IAM roles.
+## Security
 
-The workflow still needs the existing GitHub Actions secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`; the migration step runs `supabase db push --linked` before deploying. Keep production migrations additive and review them before merging to `main`.
-
-The deployment workflow does not seed demo users or sample records into the hosted database. Demo data is only created by the local startup script.
+Keep `.env`, Supabase service-role keys, Gemini API keys, and Kafka credentials out of version control. Service-role and model keys must remain server-side. Preserve caller-scoped Supabase requests and RLS boundaries when changing API or assistant tools.
